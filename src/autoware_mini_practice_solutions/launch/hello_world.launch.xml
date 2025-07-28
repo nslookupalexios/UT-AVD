@@ -1,0 +1,7 @@
+<launch>
+    <node pkg="autoware_mini_practice_solutions" name="publisher" type="publisher.py" output="screen" required="true" >
+         <param name="message"   value="Hello ROS!" />
+    </node>
+
+    <node pkg="autoware_mini_practice_solutions" name="subscriber" type="subscriber.py" output="screen" required="true"/>
+</launch>
