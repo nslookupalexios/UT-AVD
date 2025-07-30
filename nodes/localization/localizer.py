@@ -52,18 +52,18 @@ class Localizer:
         self.current_velocity_pub = rospy.Publisher('current_velocity', TwistStamped, queue_size=10)
         self.br = TransformBroadcaster()
 
-        self.current_pose_msg = PoseStamped()
-        self.current_pose_msg.header.frame_id = "map"
+    def transform_coordinates(self, msg):
+        current_pose_msg = PoseStamped()
+        current_pose_msg.header.frame_id = "map"
 
-        self.current_velocity_msg = TwistStamped()
-        self.current_velocity_msg.header.frame_id = "base_link"
+        current_velocity_msg = TwistStamped()
+        current_velocity_msg.header.frame_id = "base_link"
 
         # create a transform message
-        self.t = TransformStamped()
-        self.t.header.frame_id = "map"
-        self.t.child_frame_id = "base_link"
+        t = TransformStamped()
+        t.header.frame_id = "map"
+        t.child_frame_id = "base_link"
 
-    def transform_coordinates(self, msg):
         xf, yf = self.transformer.transform(msg.latitude, msg.longitude)
         xf-= self.origin_x
         yf-=self.origin_y
@@ -78,27 +78,27 @@ class Localizer:
         orientation = Quaternion(x, y, z, w)
 
         # publish current pose
-        self.current_pose_msg.header.stamp = msg.header.stamp
-        self.current_pose_msg.pose.position.x = xf
-        self.current_pose_msg.pose.position.y = yf
-        self.current_pose_msg.pose.position.z = zf
-        self.current_pose_msg.pose.orientation = orientation
+        current_pose_msg.header.stamp = msg.header.stamp
+        current_pose_msg.pose.position.x = xf
+        current_pose_msg.pose.position.y = yf
+        current_pose_msg.pose.position.z = zf
+        current_pose_msg.pose.orientation = orientation
 
 
-        self.current_velocity_msg.header.stamp = msg.header.stamp
-        self.current_velocity_msg.twist.linear.x = math.sqrt(msg.north_velocity*msg.north_velocity + msg.east_velocity*msg.east_velocity)
+        current_velocity_msg.header.stamp = msg.header.stamp
+        current_velocity_msg.twist.linear.x = math.sqrt(msg.north_velocity*msg.north_velocity + msg.east_velocity*msg.east_velocity)
         
         # fill in the transform message - t
 
         # publish transform
-        self.t.header.stamp = msg.header.stamp
+        t.header.stamp = msg.header.stamp
         
-        self.t.transform.translation = self.current_pose_msg.pose.position
-        self.t.transform.rotation = orientation
+        t.transform.translation = current_pose_msg.pose.position
+        t.transform.rotation = orientation
         
-        self.current_pose_pub.publish(self.current_pose_msg)
-        self.current_velocity_pub.publish(  self.current_velocity_msg)
-        self.br.sendTransform(self.t)
+        self.current_pose_pub.publish(current_pose_msg)
+        self.current_velocity_pub.publish(current_velocity_msg)
+        self.br.sendTransform(t)
 
 
 
