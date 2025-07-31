@@ -8,6 +8,7 @@ from lanelet2.geometry import findNearest
 from lanelet2 import traffic_rules, routing
 from autoware_mini.msg import Path
 from geometry_msgs.msg import PoseStamped
+from autoware_mini.msg import Waypoint
 
 
 def load_lanelet2_map(map_path):
@@ -36,6 +37,10 @@ class Lanelet2GlobalPlanner:
         """
         # Load parameters
         map_path = rospy.get_param("~lanelet2_map_path")
+        self.speed_limit = int(rospy.get_param("~speed_limit"))
+        self.output_frame = rospy.get_param("lanelet2_global_planner/output_frame")
+        self.distance_to_goal_limit = rospy.get_param("~distance_to_goal_limit", 1.0)
+
 
         # Internal state
         self.current_location = None
@@ -75,6 +80,12 @@ class Lanelet2GlobalPlanner:
         :param msg: ROS PoseStamped containing current pose
         """
         self.current_location = BasicPoint2d(msg.pose.position.x, msg.pose.position.y)
+        if self.goal_point is not None:
+            dist = ((self.current_location.x - self.goal_point.x)**2 + (self.current_location.y - self.goal_point.y)**2)**0.5
+            if dist <= self.distance_to_goal_limit:
+                rospy.loginfo("[%s] Goal reached! Distance = %.2f m. Clearing path.", rospy.get_name(), dist)
+                self._clear_path()
+                self.goal_point = None
 
     def goal_callback(self, msg):
         """
@@ -83,7 +94,7 @@ class Lanelet2GlobalPlanner:
         :param msg: ROS PoseStamped containing goal pose
         """
         rospy.loginfo(
-            "[%s] Received goal position: (%.2f, %.2f, %.2f), orientation: (%.2f, %.2f, %.2f, %.2f) in frame %s",
+            "[%s] Received goal position: (%.3f, %.3f, %.3f), orientation: (%.3f, %.3f, %.3f, %.3f) in frame %s",
             rospy.get_name(),
             msg.pose.position.x, msg.pose.position.y, msg.pose.position.z,
             msg.pose.orientation.x, msg.pose.orientation.y,
@@ -117,9 +128,59 @@ class Lanelet2GlobalPlanner:
 
         rospy.loginfo("[%s] Route successfully calculated with %d lanelets.", rospy.get_name(), len(continuous_path))
 
-        # TODO: Convert `continuous_path` to `Path` message and publish to /global_path
-        # self._publish_path(continuous_path)
+        self._publish_path(continuous_path)
 
+    
+    def _lanelet_seq_to_waypoints(self, lanelet_sequence):
+        """
+        Convert a LaneletSequence into a list of Waypoints.
+
+        :param lanelet_sequence: Lanelet2 LaneletSequence
+        :return: List of Waypoint messages
+        """
+        waypoints = []
+        seen = set()
+
+        for lanelet in lanelet_sequence:
+            if 'speed_ref' in lanelet.attributes:
+                speed_kmh = float(lanelet.attributes['speed_ref'])
+            else:
+                speed_kmh = self.speed_limit
+
+            speed_mps = min(speed_kmh, self.speed_limit) * (1000.0 / 3600.0)
+
+            for point in lanelet.centerline:
+                point_id = (round(point.x, 3), round(point.y, 3), round(point.z, 3))
+                if point_id in seen:
+                    continue
+                seen.add(point_id)
+
+                waypoint = Waypoint()
+                waypoint.position.x = point.x
+                waypoint.position.y = point.y
+                waypoint.position.z = point.z
+                waypoint.speed = speed_mps
+
+                waypoints.append(waypoint)
+
+        return waypoints
+
+    def _publish_path(self, lanelet_sequence):
+        """
+        Convert a LaneletSequence to a Path message and publish it.
+
+        :param lanelet_sequence: Lanelet2 LaneletSequence
+        """
+        waypoints = self._lanelet_seq_to_waypoints(lanelet_sequence)
+
+        path = Path()
+        path.header.frame_id = self.output_frame
+        path.header.stamp = rospy.Time.now()
+        path.waypoints = waypoints
+
+        self.waypoints_pub.publish(path)
+
+    
     def _get_nearest_lanelet(self, point, label):
         """
         Utility method to find the nearest lanelet to a given 2D point.
@@ -134,15 +195,18 @@ class Lanelet2GlobalPlanner:
         except Exception as e:
             rospy.logerr("[%s] Error finding nearest lanelet to %s point: %s", rospy.get_name(), label, str(e))
             return None
-
-    def _publish_path(self, lanelet_sequence):
+    
+    def _clear_path(self):
         """
-        Convert a LaneletSequence to a Path message and publish it.
-
-        :param lanelet_sequence: Lanelet2 LaneletSequence
+        Publishes an empty path to clear the current route.
         """
-        # Placeholder for future path publication logic
-        pass
+        path = Path()
+        path.header.frame_id = self.output_frame
+        path.header.stamp = rospy.Time.now()
+        path.waypoints = []
+
+        self.waypoints_pub.publish(path)
+
 
 
 if __name__ == '__main__':

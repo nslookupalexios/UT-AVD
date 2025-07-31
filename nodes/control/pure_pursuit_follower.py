@@ -31,24 +31,28 @@ class PurePursuitFollower:
 
 
     def path_callback(self, msg):
-        # convert waypoints to shapely linestring
-        self.path_linestring = LineString([(w.position.x, w.position.y) for w in msg.waypoints])
-        # prepare path - creates spatial tree, making the spatial queries more efficient
-        prepare(self.path_linestring)
-        # Create a distance-to-velocity interpolator for the path
-        # collect waypoint x and y coordinates
-        waypoints_xy = np.array([(w.position.x, w.position.y) for w in msg.waypoints])
-        # Calculate distances between points
-        distances = np.cumsum(np.sqrt(np.sum(np.diff(waypoints_xy, axis=0)**2, axis=1)))
-        # add 0 distance in the beginning
-        distances = np.insert(distances, 0, 0)
-        # Extract velocity values at waypoints
-        velocities = np.array([w.speed for w in msg.waypoints])
-        self.distance_to_velocity_interpolator = interp1d(distances, velocities, kind='linear')
+        if msg.waypoints and len(msg.waypoints) > 1:
+            # convert waypoints to shapely linestring
+            self.path_linestring = LineString([(w.position.x, w.position.y) for w in msg.waypoints])
+            # prepare path - creates spatial tree, making the spatial queries more efficient
+            prepare(self.path_linestring)
+            # Create a distance-to-velocity interpolator for the path
+            # collect waypoint x and y coordinates
+            waypoints_xy = np.array([(w.position.x, w.position.y) for w in msg.waypoints])
+            # Calculate distances between points
+            distances = np.cumsum(np.sqrt(np.sum(np.diff(waypoints_xy, axis=0)**2, axis=1)))
+            # add 0 distance in the beginning
+            distances = np.insert(distances, 0, 0)
+            # Extract velocity values at waypoints
+            velocities = np.array([w.speed for w in msg.waypoints])
+            self.distance_to_velocity_interpolator = interp1d(distances, velocities, kind='linear')
+        else:
+            self.path_linestring = None
+            self.distance_to_velocity_interpolator = None
 
 
     def current_pose_callback(self, msg):
-        if self.path_linestring is not None:
+        if self.path_linestring is not None and self.path_linestring.length > 0:
             current_pose = Point([msg.pose.position.x, msg.pose.position.y])
             d_ego_from_path_start = self.path_linestring.project(current_pose)
             
