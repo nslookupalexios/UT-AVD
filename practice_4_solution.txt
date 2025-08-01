@@ -1,0 +1,21 @@
+To address this issue, the method `_lanelet_seq_to_waypoints` was modified. This method takes as input a sequence of lanelets representing the planned route towards the target, and returns a list of `autoware_mini.msg.Waypoint` messages.
+
+Previous Solution
+
+Previously, the method performed a direct conversion from lanelets to `Waypoint` messages, without any additional processing. As a result, the generated list of waypoints could include points beyond the intended final position (goal), leading to imprecise behavior.
+
+Current Structured Solution
+
+The updated approach introduces a more structured process, composed of the following steps:
+
+1. Interpolation of lanelet points
+   The original lanelet points can be spaced relatively far apart. To prevent the selection of a point that is too distant from the target, an interpolation step is performed to densify the point sequence, producing a more continuous and accurate path.
+
+2. Search for the point closest to the target
+   After interpolation, the algorithm identifies the point in the sequence that is closest to the desired goal position.
+
+3. Replacement of the goal point
+   Once the closest point has been identified, it is used to replace the original goal. This ensures that the new endpoint lies precisely on the center line of the road, improving geometric consistency with the lanelet structure and enhancing safety.
+
+4. Output of the waypoint list
+   Finally, the method returns the list of `Waypoint` messages, truncated at the point identified as closest to the target. This prevents overshooting the destination.
