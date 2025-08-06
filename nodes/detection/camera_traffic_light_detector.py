@@ -20,7 +20,6 @@ from tf2_geometry_msgs import do_transform_point
 
 from cv_bridge import CvBridge, CvBridgeError
 
-
 # Classifier outputs 4 classes (LightState)
 CLASSIFIER_RESULT_TO_STRING = {
     0: "green",
@@ -30,18 +29,19 @@ CLASSIFIER_RESULT_TO_STRING = {
 }
 
 CLASSIFIER_RESULT_TO_COLOR = {
-    0: (0,255,0),
-    1: (255,255,0),
-    2: (255,0,0),
-    3: (0,0,0)
+    0: (0, 255, 0),
+    1: (255, 255, 0),
+    2: (255, 0, 0),
+    3: (0, 0, 0)
 }
 
 CLASSIFIER_RESULT_TO_TLRESULT = {
-    0: 1,   # GREEN
-    1: 0,   # YELLOW
-    2: 0,   # RED
-    3: 2    # UNKNOWN
+    0: 1,  # GREEN
+    1: 0,  # YELLOW
+    2: 0,  # RED
+    3: 2  # UNKNOWN
 }
+
 
 class CameraTrafficLightDetector:
     def __init__(self):
@@ -86,14 +86,16 @@ class CameraTrafficLightDetector:
         self.tfl_stoplines = {k: v for k, v in all_stoplines.items() if k in self.trafficlights}
 
         # Publishers
-        self.tfl_status_pub = rospy.Publisher('traffic_light_status', TrafficLightResultArray, queue_size=1, tcp_nodelay=True)
+        self.tfl_status_pub = rospy.Publisher('traffic_light_status', TrafficLightResultArray, queue_size=1,
+                                              tcp_nodelay=True)
         self.tfl_roi_pub = rospy.Publisher('traffic_light_roi', Image, queue_size=1, tcp_nodelay=True)
 
         # Subscribers
         rospy.Subscriber('camera_info', CameraInfo, self.camera_info_callback, queue_size=1, tcp_nodelay=True)
-        rospy.Subscriber('/planning/local_path', Path, self.local_path_callback, queue_size=1, buff_size=2**20, tcp_nodelay=True)
-        rospy.Subscriber('image_raw', Image, self.camera_image_callback, queue_size=1, buff_size=2**26, tcp_nodelay=True)
-
+        rospy.Subscriber('/planning/local_path', Path, self.local_path_callback, queue_size=1, buff_size=2 ** 20,
+                         tcp_nodelay=True)
+        rospy.Subscriber('image_raw', Image, self.camera_image_callback, queue_size=1, buff_size=2 ** 26,
+                         tcp_nodelay=True)
 
     def camera_info_callback(self, camera_info_msg):
         if self.camera_model is None:
@@ -102,6 +104,7 @@ class CameraTrafficLightDetector:
             self.camera_model = camera_model
 
     def local_path_callback(self, local_path_msg):
+
         # used in calculate_roi_coordinates to filter out only relevant signals
         stoplines_on_path = []
 
@@ -123,20 +126,17 @@ class CameraTrafficLightDetector:
             stoplines_on_path = self.stoplines_on_path
             transform_from_frame = self.transform_from_frame
 
-
     def calculate_roi_coordinates(self, stoplines_on_path, transform):
         pass
 
     def create_roi_images(self, image, rois):
         pass
 
-
     def publish_roi_images(self, image, rois, classes, scores, image_time_stamp):
-        
+
         # add rois to image
         if len(rois) > 0:
             for cl, score, (_, _, min_u, max_u, min_v, max_v) in zip(classes, scores, rois):
-
                 text_string = "%s %.2f" % (CLASSIFIER_RESULT_TO_STRING[cl], score)
                 text_width, text_height = cv2.getTextSize(text_string, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 2)[0]
                 text_orig_u = int(min_u + (max_u - min_u) / 2 - text_width / 2)
@@ -144,21 +144,20 @@ class CameraTrafficLightDetector:
 
                 start_point = (min_u, min_v)
                 end_point = (max_u, max_v)
-                cv2.rectangle(image, start_point, end_point, color=CLASSIFIER_RESULT_TO_COLOR[cl] , thickness=3)
+                cv2.rectangle(image, start_point, end_point, color=CLASSIFIER_RESULT_TO_COLOR[cl], thickness=3)
                 cv2.putText(image,
-                    text_string,
-                    org=(text_orig_u, text_orig_v),
-                    fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=1.5,
-                    color=CLASSIFIER_RESULT_TO_COLOR[cl], 
-                    thickness=2)
+                            text_string,
+                            org=(text_orig_u, text_orig_v),
+                            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+                            fontScale=1.5,
+                            color=CLASSIFIER_RESULT_TO_COLOR[cl],
+                            thickness=2)
 
         image = cv2.resize(image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_LINEAR)
         img_msg = self.bridge.cv2_to_imgmsg(image, encoding='rgb8')
-        
+
         img_msg.header.stamp = image_time_stamp
         self.tfl_roi_pub.publish(img_msg)
-
 
     def run(self):
         rospy.spin()
@@ -179,6 +178,7 @@ def get_stoplines(lanelet2_map):
                 stoplines[line.id] = LineString([(p.x, p.y) for p in line])
 
     return stoplines
+
 
 def get_stoplines_trafficlights(lanelet2_map):
     """
@@ -210,3 +210,8 @@ def get_stoplines_trafficlights(lanelet2_map):
                 signals.setdefault(linkId, {}).setdefault(plId, traffic_light_data)
 
     return signals
+
+if __name__ == '__main__':
+    rospy.init_node('camera_traffic_light_detector', log_level=rospy.INFO)
+    node = CameraTrafficLightDetector()
+    node.run()
