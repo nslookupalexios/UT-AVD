@@ -152,8 +152,6 @@ class CameraTrafficLightDetector:
         rois = self.calculate_roi_coordinates(self.stoplines_on_path, transform)
         rospy.loginfo("rois: %s", str(rois))
 
-
-
         try:
             # Convert the ROS image message to OpenCV image
             image = self.bridge.imgmsg_to_cv2(camera_image_msg, desired_encoding='rgb8')
@@ -164,6 +162,19 @@ class CameraTrafficLightDetector:
         # Rectify image if requested
         if self.rectify_image:
             self.camera_model.rectifyImage(image, image)
+
+        
+        if rois:
+            roi_images = self.create_roi_images(image, rois)
+
+            if roi_images is None:
+                rospy.logwarn_throttle(10, "[%s] No valid ROI images created", rospy.get_name())
+                return
+
+            # Inference
+            predictions = self.model.run(None, {'conv2d_1_input': roi_images})[0]
+            rospy.loginfo("predictions: %s", str(predictions))
+
 
         # Publish the image as-is with empty bounding boxes
         empty_rois = []
@@ -239,7 +250,26 @@ class CameraTrafficLightDetector:
 
 
     def create_roi_images(self, image, rois):
-        pass
+        roi_images = []
+
+        for _, _, min_u, max_u, min_v, max_v in rois:
+            try:
+                # Ritaglio ROI dall'immagine
+                roi = image[min_v:max_v, min_u:max_u, :]
+
+                # Ridimensionamento a 128x128
+                roi_resized = cv2.resize(roi, (128, 128), interpolation=cv2.INTER_LINEAR)
+
+                # Conversione a float32 e normalizzazione
+                roi_images.append(roi_resized.astype(np.float32))
+
+            except Exception as e:
+                rospy.logwarn_throttle(10, "[%s] ROI creation failed: %s", rospy.get_name(), str(e))
+                continue
+
+        # Stacka tutte le immagini lungo l'asse 0 e normalizza [0,1]
+        return np.stack(roi_images, axis=0) / 255.0 if roi_images else None
+
 
     def publish_roi_images(self, image, rois, classes, scores, image_time_stamp):
 
