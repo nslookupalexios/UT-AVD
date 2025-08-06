@@ -104,13 +104,25 @@ class CameraTrafficLightDetector:
             self.camera_model = camera_model
 
     def local_path_callback(self, local_path_msg):
-
-        # used in calculate_roi_coordinates to filter out only relevant signals
         stoplines_on_path = []
+
+        # Costruisci la geometria della path come LineString
+        if not local_path_msg.waypoints:
+            rospy.logwarn_throttle(10, "%s - Received empty local path", rospy.get_name())
+            return
+
+        path_points = [(pose.position.x, pose.position.y) for pose in local_path_msg.waypoints]
+        path_line = LineString(path_points)
+
+        # Itera sulle stoplines della mappa che sono associate a semafori
+        for stopline_id, stopline in self.tfl_stoplines.items():
+            if path_line.intersects(stopline):
+                stoplines_on_path.append(stopline_id)
 
         with self.lock:
             self.stoplines_on_path = stoplines_on_path
             self.transform_from_frame = local_path_msg.header.frame_id
+
 
     def camera_image_callback(self, camera_image_msg):
         if self.camera_model is None:
@@ -120,6 +132,9 @@ class CameraTrafficLightDetector:
         if self.stoplines_on_path is None:
             rospy.logwarn_throttle(10, "%s - No path received, skipping image", rospy.get_name())
             return
+        
+        rospy.loginfo("stoplines_on_path: %s", str(self.stoplines_on_path))
+
 
         try:
             # Convert the ROS image message to OpenCV image
