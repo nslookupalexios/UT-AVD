@@ -174,18 +174,33 @@ class CameraTrafficLightDetector:
             # Inference
             predictions = self.model.run(None, {'conv2d_1_input': roi_images})[0]
             rospy.loginfo("predictions: %s", str(predictions))
+            classes = np.argmax(predictions, axis=1)
+            scores = np.max(predictions, axis=1)
+            tfl_status = TrafficLightResultArray()
+            tfl_status.header.stamp = camera_image_msg.header.stamp
 
+            for cl, (stoplineId, plId, _, _, _, _) in zip(classes, rois):
+                tfl_result = TrafficLightResult()
+                tfl_result.stopline_id = stoplineId
+                tfl_result.light_id = plId
+                tfl_result.recognition_result = CLASSIFIER_RESULT_TO_TLRESULT[cl]
+                tfl_result.recognition_result_str = CLASSIFIER_RESULT_TO_STRING[cl]
+                tfl_status.results.append(tfl_result)
 
-        # Publish the image as-is with empty bounding boxes
-        empty_rois = []
-        empty_classes = []
-        empty_scores = []
-        self.publish_roi_images(image, empty_rois, empty_classes, empty_scores, camera_image_msg.header.stamp)
+            self.tfl_status_pub.publish(tfl_status)
+            self.publish_roi_images(image, rois, classes, scores, camera_image_msg.header.stamp)
 
-        # Publish an empty TrafficLightResultArray
-        tfl_status = TrafficLightResultArray()
-        tfl_status.header.stamp = camera_image_msg.header.stamp
-        self.tfl_status_pub.publish(tfl_status)
+        else:
+            # Publish the image as-is with empty bounding boxes
+            empty_rois = []
+            empty_classes = []
+            empty_scores = []
+            self.publish_roi_images(image, empty_rois, empty_classes, empty_scores, camera_image_msg.header.stamp)
+
+            # Publish an empty TrafficLightResultArray
+            tfl_status = TrafficLightResultArray()
+            tfl_status.header.stamp = camera_image_msg.header.stamp
+            self.tfl_status_pub.publish(tfl_status)
 
 
     def calculate_roi_coordinates(self, stoplines_on_path, transform):
@@ -208,14 +223,13 @@ class CameraTrafficLightDetector:
                         point_camera = do_transform_point(point_stamped, transform).point
 
                         # Coordinate pixel da punto 3D
-                        u, v = self.camera_model.project3dToPixel(
+                        u,v = self.camera_model.project3dToPixel(
                             (point_camera.x, point_camera.y, point_camera.z))
 
                         # Ignora se fuori dall'immagine
                         if u < 0 or u >= self.camera_model.width or v < 0 or v >= self.camera_model.height:
                             continue
 
-                        # Estensione in pixel (da metri)
                         extent_x_px = self.camera_model.fx() * self.roi_width_extent / point_camera.z
                         extent_y_px = self.camera_model.fy() * self.roi_height_extent / point_camera.z
 
@@ -272,7 +286,6 @@ class CameraTrafficLightDetector:
 
 
     def publish_roi_images(self, image, rois, classes, scores, image_time_stamp):
-
         # add rois to image
         if len(rois) > 0:
             for cl, score, (_, _, min_u, max_u, min_v, max_v) in zip(classes, scores, rois):
@@ -297,6 +310,7 @@ class CameraTrafficLightDetector:
 
         img_msg.header.stamp = image_time_stamp
         self.tfl_roi_pub.publish(img_msg)
+    
 
     def run(self):
         rospy.spin()
