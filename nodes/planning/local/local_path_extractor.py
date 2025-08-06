@@ -112,21 +112,17 @@ class LocalPathExtractor:
 
    def extract_waypoints(self, global_path_linestring, global_path_distances, d_ego_from_path_start, local_path_length, global_path_velocities_interpolator):
 
-       # current position is projected at the end of the global path - goal reached
        if math.isclose(d_ego_from_path_start, global_path_linestring.length):
            return None
 
        d_to_local_path_end = d_ego_from_path_start + local_path_length
 
-       # find index where distances are higher than ego_d_on_global_path
        index_start = np.argmax(global_path_distances >= d_ego_from_path_start)
        index_end = np.argmax(global_path_distances >= d_to_local_path_end)
 
-       # if end point of local_path is past the end of the global path (returns 0) then take index of last point
        if index_end == 0:
            index_end = len(global_path_linestring.coords) - 1
 
-       # create local path from global path add interpolated points at start and end, use sliced point coordinates in between
        start_point = global_path_linestring.interpolate(d_ego_from_path_start)
        end_point = global_path_linestring.interpolate(d_to_local_path_end)
        local_path_xyz = start_point.coords[:] + list(global_path_linestring.coords[index_start:index_end]) + end_point.coords[:]

@@ -87,11 +87,8 @@ class SpeedPlanner:
                 cp_point = Point(cp['x'], cp['y'])
                 distance_to_cp = local_path_linestring.project(cp_point)
 
-                # remove the distance from base link to car nose, and then from car nose considering the distance to stop
-                # in this way the real distance available is smaller than before
                 corrected_distance_to_cp = distance_to_cp - self.distance_to_car_front - cp['distance_to_stop']
 
-                # Calculate heading and projected velocity of the object
                 heading = self.get_heading_at_distance(local_path_linestring, distance_to_cp)
                 obj_velocity_vector = Vector3(x=cp['vx'], y=cp['vy'], z=cp['vz'])
                 obj_speed = np.linalg.norm([cp['vx'], cp['vy'], cp['vz']])
@@ -143,12 +140,6 @@ class SpeedPlanner:
 
 
     def get_heading_at_distance(self, linestring, distance):
-        """
-        Get heading of the path at a given distance
-        :param distance: distance along the path
-        :param linestring: shapely linestring
-        :return: heading angle in radians
-        """
 
         point_after_object = linestring.interpolate(distance + 0.1)
         # if distance is negative it is measured from the end of the linestring in reverse direction
@@ -159,13 +150,6 @@ class SpeedPlanner:
 
 
     def project_vector_to_heading(self, heading_angle, vector):
-        """
-        Project vector to heading
-        :param heading_angle: heading angle in radians
-        :param vector: vector
-        :return: projected vector
-        """
-
         return vector.x * math.cos(heading_angle) + vector.y * math.sin(heading_angle)
 
     def run(self):

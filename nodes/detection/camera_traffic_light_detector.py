@@ -113,7 +113,6 @@ class CameraTrafficLightDetector:
             self.transform_from_frame = local_path_msg.header.frame_id
 
     def camera_image_callback(self, camera_image_msg):
-
         if self.camera_model is None:
             rospy.logwarn_throttle(10, "%s - No camera model received, skipping image", rospy.get_name())
             return
@@ -122,9 +121,28 @@ class CameraTrafficLightDetector:
             rospy.logwarn_throttle(10, "%s - No path received, skipping image", rospy.get_name())
             return
 
-        with self.lock:
-            stoplines_on_path = self.stoplines_on_path
-            transform_from_frame = self.transform_from_frame
+        try:
+            # Convert the ROS image message to OpenCV image
+            image = self.bridge.imgmsg_to_cv2(camera_image_msg, desired_encoding='rgb8')
+        except CvBridgeError as e:
+            rospy.logerr("CV Bridge error: %s", str(e))
+            return
+
+        # Rectify image if requested
+        if self.rectify_image:
+            self.camera_model.rectifyImage(image, image)
+
+        # Publish the image as-is with empty bounding boxes
+        empty_rois = []
+        empty_classes = []
+        empty_scores = []
+        self.publish_roi_images(image, empty_rois, empty_classes, empty_scores, camera_image_msg.header.stamp)
+
+        # Publish an empty TrafficLightResultArray
+        tfl_status = TrafficLightResultArray()
+        tfl_status.header.stamp = camera_image_msg.header.stamp
+        self.tfl_status_pub.publish(tfl_status)
+
 
     def calculate_roi_coordinates(self, stoplines_on_path, transform):
         pass
