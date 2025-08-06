@@ -64,60 +64,74 @@ class CollisionPointsManager:
     def path_callback(self, msg):
         with self.lock:
             detected_objects = self.detected_objects
+
         collision_points = np.array([], dtype=DTYPE)
 
-
-        if len(msg.waypoints) > 0:
-
-            local_path_linestring = shapely.LineString([(waypoint.position.x, waypoint.position.y) for waypoint in msg.waypoints])
-            local_path_buffer = local_path_linestring.buffer(self.safety_box_width / 2, cap_style="flat")
-            shapely.prepare(local_path_buffer)
-
-            if len(detected_objects) > 0:
-
-                for obj in detected_objects:
-                    convex_hull_array = np.array(obj.convex_hull).reshape(-1, 3)
-                    convex_hull_2d = convex_hull_array[:, :2]
-    
-                    object_polygon = shapely.Polygon(convex_hull_2d)
-
-                
-                    if not object_polygon.intersects(local_path_buffer):
-                        continue
-
-                    intersection_geom = object_polygon.intersection(local_path_buffer)
-                    intersection_coords = shapely.get_coordinates(intersection_geom)
-
-                    object_speed = np.linalg.norm([
-                        obj.velocity.x,
-                        obj.velocity.y,
-                        obj.velocity.z
-                    ])
-
-                    for x, y in intersection_coords:
-                        collision_points = np.append(collision_points, np.array([(x, y, obj.centroid.z, obj.velocity.x, obj.velocity.y, obj.velocity.z,
-                                                                                                    self.braking_safety_distance_obstacle, np.inf, 3 if object_speed < self.stopped_speed_limit else 4)], dtype=DTYPE))
-
-            # goal waypoint processing
-            if self.goal_waypoint is not None:
-                goal_point = shapely.Point(self.goal_waypoint.position.x, self.goal_waypoint.position.y)
-                goal_buffer = goal_point.buffer(0.5) # 0.5 expands the goal point slightly (into a small circular area) and gives tolerance to account for small path/goal mismatches
-                if goal_buffer.intersects(local_path_buffer):
-                    collision_points = np.append(collision_points, np.array([(goal_point.x, goal_point.y, self.goal_waypoint.position.z,
-                                                                            0.0, 0.0, 0.0,  # no velocity because its a static point
-                                                                            self.braking_safety_distance_goal, np.inf,
-                                                                            1)],  # category 1 = goal
-                                                                            dtype=DTYPE))
-
-            
-            pointcloud_msg = msgify(PointCloud2, collision_points)
-            pointcloud_msg.header = msg.header
-            self.local_path_collision_pub.publish(pointcloud_msg)
+        if len(msg.waypoints) == 0:
+            empty_message = PointCloud2()
+            empty_message.header = msg.header
+            self.local_path_collision_pub.publish(empty_message)
             return
 
-        empty_message = PointCloud2()
-        empty_message.header = msg.header
-        self.local_path_collision_pub.publish(empty_message)
+        # Create local path buffer
+        local_path_linestring = shapely.LineString([
+            (waypoint.position.x, waypoint.position.y) for waypoint in msg.waypoints
+        ])
+        local_path_buffer = local_path_linestring.buffer(self.safety_box_width / 2, cap_style="flat")
+        shapely.prepare(local_path_buffer)
+
+        # Process detected objects
+        if len(detected_objects) > 0:
+            for obj in detected_objects:
+                convex_hull_array = np.array(obj.convex_hull).reshape(-1, 3)
+                convex_hull_2d = convex_hull_array[:, :2]
+
+                object_polygon = shapely.Polygon(convex_hull_2d)
+
+                if not object_polygon.intersects(local_path_buffer):
+                    continue
+
+                intersection_geom = object_polygon.intersection(local_path_buffer)
+                intersection_coords = shapely.get_coordinates(intersection_geom)
+
+                object_speed = np.linalg.norm([
+                    obj.velocity.x,
+                    obj.velocity.y,
+                    obj.velocity.z
+                ])
+
+                for x, y in intersection_coords:
+                    point = np.array([(
+                        x, y, obj.centroid.z,
+                        obj.velocity.x, obj.velocity.y, obj.velocity.z,
+                        self.braking_safety_distance_obstacle,
+                        np.inf,
+                        3 if object_speed < self.stopped_speed_limit else 4
+                    )], dtype=DTYPE)
+                    collision_points = np.append(collision_points, point)
+
+        # Check goal waypoint
+        if self.goal_waypoint is not None:
+            goal_point = shapely.Point(
+                self.goal_waypoint.position.x,
+                self.goal_waypoint.position.y
+            )
+            goal_buffer = goal_point.buffer(0.5)  # Tolerance area for goal
+
+            if goal_buffer.intersects(local_path_buffer):
+                goal_collision_point = np.array([(
+                    goal_point.x, goal_point.y, self.goal_waypoint.position.z,
+                    0.0, 0.0, 0.0,  # Static point
+                    self.braking_safety_distance_goal,
+                    np.inf,
+                    1  # Category 1 = goal
+                )], dtype=DTYPE)
+                collision_points = np.append(collision_points, goal_collision_point)
+
+        # Publish collision points
+        pointcloud_msg = msgify(PointCloud2, collision_points)
+        pointcloud_msg.header = msg.header
+        self.local_path_collision_pub.publish(pointcloud_msg)
 
     def run(self):
         rospy.spin()
