@@ -106,7 +106,6 @@ class CameraTrafficLightDetector:
     def local_path_callback(self, local_path_msg):
         stoplines_on_path = []
 
-        # Costruisci la geometria della path come LineString
         if not local_path_msg.waypoints:
             rospy.logwarn_throttle(10, "%s - Received empty local path", rospy.get_name())
             return
@@ -114,7 +113,6 @@ class CameraTrafficLightDetector:
         path_points = [(pose.position.x, pose.position.y) for pose in local_path_msg.waypoints]
         path_line = LineString(path_points)
 
-        # Itera sulle stoplines della mappa che sono associate a semafori
         for stopline_id, stopline in self.tfl_stoplines.items():
             if path_line.intersects(stopline):
                 stoplines_on_path.append(stopline_id)
@@ -133,7 +131,27 @@ class CameraTrafficLightDetector:
             rospy.logwarn_throttle(10, "%s - No path received, skipping image", rospy.get_name())
             return
         
+        if self.transform_from_frame is None:
+            rospy.logwarn_throttle(10, "%s - No valid transform from this frame, skipping image", rospy.get_name())
+            return
+        
         rospy.loginfo("stoplines_on_path: %s", str(self.stoplines_on_path))
+        
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                camera_image_msg.header.frame_id,
+                self.transform_from_frame,
+                rospy.Time(0),
+                rospy.Duration(self.transform_timeout)
+            )
+        except (tf2_ros.LookupException, tf2_ros.ExtrapolationException, tf2_ros.ConnectivityException) as ex:
+            rospy.logwarn_throttle(10, "[%s] TF lookup failed: %s", rospy.get_name(), str(ex))
+            return
+
+        
+        rois = self.calculate_roi_coordinates(self.stoplines_on_path, transform)
+        rospy.loginfo("rois: %s", str(rois))
+
 
 
         try:
@@ -160,7 +178,65 @@ class CameraTrafficLightDetector:
 
 
     def calculate_roi_coordinates(self, stoplines_on_path, transform):
-        pass
+        rois = []
+
+        for linkId in stoplines_on_path:
+            for plId, traffic_lights in self.trafficlights[linkId].items():
+                us = []
+                vs = []
+
+                for x, y, z in traffic_lights.values():
+                    point_map = Point(float(x), float(y), float(z))
+
+                    try:
+                        point_stamped = PointStamped()
+                        point_stamped.header.stamp = rospy.Time(0)
+                        point_stamped.header.frame_id = transform.header.frame_id
+                        point_stamped.point = point_map
+
+                        point_camera = do_transform_point(point_stamped, transform).point
+
+                        # Coordinate pixel da punto 3D
+                        u, v = self.camera_model.project3dToPixel(
+                            (point_camera.x, point_camera.y, point_camera.z))
+
+                        # Ignora se fuori dall'immagine
+                        if u < 0 or u >= self.camera_model.width or v < 0 or v >= self.camera_model.height:
+                            continue
+
+                        # Estensione in pixel (da metri)
+                        extent_x_px = self.camera_model.fx() * self.roi_width_extent / point_camera.z
+                        extent_y_px = self.camera_model.fy() * self.roi_height_extent / point_camera.z
+
+                        us.extend([u + extent_x_px, u - extent_x_px])
+                        vs.extend([v + extent_y_px, v - extent_y_px])
+
+                    except Exception as e:
+                        rospy.logwarn_throttle(10, "[%s] ROI projection failed: %s", rospy.get_name(), str(e))
+                        continue
+
+                # Se meno di 4 vertici validi (quindi meno di 8 coordinate), ignora
+                if len(us) < 8:
+                    continue
+
+                # Clipping e rounding
+                us = np.clip(np.round(np.array(us)), 0, self.camera_model.width - 1)
+                vs = np.clip(np.round(np.array(vs)), 0, self.camera_model.height - 1)
+
+                min_u = int(np.min(us))
+                max_u = int(np.max(us))
+                min_v = int(np.min(vs))
+                max_v = int(np.max(vs))
+
+                # Scarta bounding box troppo piccole
+                if max_u - min_u < self.min_roi_width:
+                    continue
+
+                # Aggiungi ROI
+                rois.append([int(linkId), plId, min_u, max_u, min_v, max_v])
+
+        return rois
+
 
     def create_roi_images(self, image, rois):
         pass
