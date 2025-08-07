@@ -65,6 +65,7 @@ class CameraTrafficLightDetector:
         self.tfl_stoplines = None
         self.camera_model = None
         self.stoplines_on_path = None
+        self.transform_from_frame = None
 
         self.lock = threading.Lock()
         self.bridge = CvBridge()
@@ -123,25 +124,31 @@ class CameraTrafficLightDetector:
 
 
     def camera_image_callback(self, camera_image_msg):
+        
+        with self.lock:
+            stoplines_on_path = self.stoplines_on_path
+            transform_from_frame = self.transform_from_frame
+        
         if self.camera_model is None:
             rospy.logwarn_throttle(10, "%s - No camera model received, skipping image", rospy.get_name())
             return
 
-        if self.stoplines_on_path is None:
+        if stoplines_on_path is None:
             rospy.logwarn_throttle(10, "%s - No path received, skipping image", rospy.get_name())
             return
         
-        if self.transform_from_frame is None:
+        if transform_from_frame is None:
             rospy.logwarn_throttle(10, "%s - No valid transform from this frame, skipping image", rospy.get_name())
             return
         
-        rospy.loginfo("stoplines_on_path: %s", str(self.stoplines_on_path))
+
+        rospy.loginfo("stoplines_on_path: %s", str(stoplines_on_path))
         
         try:
             transform = self.tf_buffer.lookup_transform(
                 camera_image_msg.header.frame_id,
-                self.transform_from_frame,
-                rospy.Time(0),
+                transform_from_frame,
+                camera_image_msg.header.stamp,
                 rospy.Duration(self.transform_timeout)
             )
         except (tf2_ros.LookupException, tf2_ros.ExtrapolationException, tf2_ros.ConnectivityException) as ex:
@@ -149,7 +156,7 @@ class CameraTrafficLightDetector:
             return
 
         
-        rois = self.calculate_roi_coordinates(self.stoplines_on_path, transform)
+        rois = self.calculate_roi_coordinates(stoplines_on_path, transform)
         rospy.loginfo("rois: %s", str(rois))
 
         try:
@@ -215,13 +222,8 @@ class CameraTrafficLightDetector:
                     point_map = Point(float(x), float(y), float(z))
 
                     try:
-                        point_stamped = PointStamped()
-                        point_stamped.header.stamp = rospy.Time(0)
-                        point_stamped.header.frame_id = transform.header.frame_id
-                        point_stamped.point = point_map
-
-                        point_camera = do_transform_point(point_stamped, transform).point
-
+                        point_camera = do_transform_point(PointStamped(point=point_map), transform).point
+                        
                         # Coordinate pixel da punto 3D
                         u,v = self.camera_model.project3dToPixel(
                             (point_camera.x, point_camera.y, point_camera.z))
@@ -240,7 +242,6 @@ class CameraTrafficLightDetector:
                         rospy.logwarn_throttle(10, "[%s] ROI projection failed: %s", rospy.get_name(), str(e))
                         continue
 
-                # Se meno di 4 vertici validi (quindi meno di 8 coordinate), ignora
                 if len(us) < 8:
                     continue
 
@@ -268,15 +269,9 @@ class CameraTrafficLightDetector:
 
         for _, _, min_u, max_u, min_v, max_v in rois:
             try:
-                # Ritaglio ROI dall'immagine
                 roi = image[min_v:max_v, min_u:max_u, :]
-
-                # Ridimensionamento a 128x128
                 roi_resized = cv2.resize(roi, (128, 128), interpolation=cv2.INTER_LINEAR)
-
-                # Conversione a float32 e normalizzazione
                 roi_images.append(roi_resized.astype(np.float32))
-
             except Exception as e:
                 rospy.logwarn_throttle(10, "[%s] ROI creation failed: %s", rospy.get_name(), str(e))
                 continue
