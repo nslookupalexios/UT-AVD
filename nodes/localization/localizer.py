@@ -71,7 +71,7 @@ class Localizer:
         # calculate azimuth correction
         azimuth_correction = self.utm_projection.get_factors(msg.longitude, msg.latitude).meridian_convergence
         
-        yaw = convert_azimuth_to_yaw(math.radians(msg.azimuth)-azimuth_correction)
+        yaw = convert_azimuth_to_yaw(math.radians(msg.azimuth-azimuth_correction))
         
         # Convert yaw to quaternion
         x, y, z, w = quaternion_from_euler(0, 0, yaw)
